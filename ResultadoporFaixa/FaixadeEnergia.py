@@ -22,10 +22,10 @@ os.makedirs("resultados/residuos", exist_ok=True)
 # =====================================================
 
 datasets = {
-    '0.2': pd.read_csv('data_occ0_2.csv'),
-    '0.5': pd.read_csv('data_occ0_5.csv'),
-    '0.7': pd.read_csv('data_occ0_7.csv'),
-    '0.9': pd.read_csv('data_occ0_9.csv')
+    '0.2': pd.read_csv('ResultadoporFaixa/data_occ0_2.csv'),
+    '0.5': pd.read_csv('ResultadoporFaixa/data_occ0_5.csv'),
+    '0.7': pd.read_csv('ResultadoporFaixa/data_occ0_7.csv'),
+    '0.9': pd.read_csv('ResultadoporFaixa/data_occ0_9.csv')
 }
 
 # =====================================================
@@ -265,7 +265,7 @@ for occ, df_occ in datasets.items():
         dpi=300,
         bbox_inches='tight'
     )
-
+    plt.show()
     plt.close()
 
     # -------------------------------------------------
@@ -295,7 +295,7 @@ for occ, df_occ in datasets.items():
         dpi=300,
         bbox_inches='tight'
     )
-
+    plt.show()
     plt.close()
 
     print(
@@ -333,10 +333,10 @@ plt.yticks(
 )
 
 plt.xlabel('Faixa de Energia')
-plt.ylabel('Occupancy')
+plt.ylabel('Ocupação')
 
 plt.title(
-    'MAE por Faixa de Energia e Occupancy'
+    'MAE por Faixa de Energia e Ocupação'
 )
 
 plt.savefig(
