@@ -9,17 +9,16 @@ from sklearn.base import clone
 
 import os
 
-# =====================================================
+
 # CRIA PASTAS
-# =====================================================
 
 os.makedirs("resultados/graficos", exist_ok=True)
 os.makedirs("resultados/stats", exist_ok=True)
 os.makedirs("resultados/residuos", exist_ok=True)
 
-# =====================================================
+
 # LEITURA DOS DADOS
-# =====================================================
+
 
 datasets = {
     '0.2': pd.read_csv('ResultadoporFaixa/data_occ0_2.csv'),
@@ -28,9 +27,8 @@ datasets = {
     '0.9': pd.read_csv('ResultadoporFaixa/data_occ0_9.csv')
 }
 
-# =====================================================
 # REDE NEURAL
-# =====================================================
+
 
 base_model = MLPRegressor(
     hidden_layer_sizes=(20,10,5),
@@ -40,9 +38,9 @@ base_model = MLPRegressor(
     random_state=42
 )
 
-# =====================================================
+
 # ARMAZENAMENTO
-# =====================================================
+
 
 results = []
 residuals_dict = {}
@@ -50,17 +48,17 @@ residuals_dict = {}
 # dados para heatmap
 heatmap_data = {}
 
-# =====================================================
+
 # LOOP DAS OCUPAÇÕES
-# =====================================================
+
 
 for occ, df_occ in datasets.items():
 
     print(f"\n===== OCC {occ} =====")
 
-    # -------------------------------------------------
+    
     # Entradas
-    # -------------------------------------------------
+    
 
     colunas = [
         'sample(0)',
@@ -74,15 +72,15 @@ for occ, df_occ in datasets.items():
 
     X = df_occ[colunas].values
 
-    # -------------------------------------------------
+    
     # Saída
-    # -------------------------------------------------
+    
 
     y = df_occ['AmplitudeSample(4)'].values
 
-    # -------------------------------------------------
+    
     # Holdout
-    # -------------------------------------------------
+    
 
     X_temp, X_test, y_temp, y_test = train_test_split(
         X,
@@ -91,9 +89,9 @@ for occ, df_occ in datasets.items():
         random_state=42
     )
 
-    # -------------------------------------------------
+    
     # K-Fold
-    # -------------------------------------------------
+    
 
     kf = KFold(
         n_splits=10,
@@ -128,17 +126,17 @@ for occ, df_occ in datasets.items():
             np.std(residuals)
         )
 
-    # -------------------------------------------------
+    
     # Treino Final
-    # -------------------------------------------------
+    
 
     final_model = clone(base_model)
 
     final_model.fit(X_temp, y_temp)
 
-    # -------------------------------------------------
+    
     # Teste
-    # -------------------------------------------------
+    
 
     y_test_pred = final_model.predict(X_test)
 
@@ -154,9 +152,9 @@ for occ, df_occ in datasets.items():
 
     residuals_dict[occ] = test_residuals
 
-    # -------------------------------------------------
+    
     # Métricas
-    # -------------------------------------------------
+    
 
     results.append({
         'Occupancy': float(occ),
@@ -177,9 +175,9 @@ for occ, df_occ in datasets.items():
             test_std
     })
 
-    # =================================================
+    
     # ANÁLISE POR FAIXA DE ENERGIA
-    # =================================================
+    
 
     df_analysis = pd.DataFrame({
         'Amplitude_Real': y_test,
@@ -220,9 +218,9 @@ for occ, df_occ in datasets.items():
         labels=labels
     )
 
-    # -------------------------------------------------
+    
     # MAE por faixa
-    # -------------------------------------------------
+    
 
     mae_faixa = (
         df_analysis
@@ -232,9 +230,9 @@ for occ, df_occ in datasets.items():
 
     heatmap_data[occ] = mae_faixa
 
-    # -------------------------------------------------
+    
     # Resíduo x Energia
-    # -------------------------------------------------
+    
 
     plt.figure(figsize=(8,6))
 
@@ -268,9 +266,9 @@ for occ, df_occ in datasets.items():
     plt.show()
     plt.close()
 
-    # -------------------------------------------------
+    
     # Boxplot
-    # -------------------------------------------------
+    
 
     plt.figure(figsize=(10,6))
 
@@ -302,9 +300,9 @@ for occ, df_occ in datasets.items():
         f"Test MAE = {test_mae:.4f}"
     )
 
-# =====================================================
+
 # HEATMAP
-# =====================================================
+
 
 heatmap_df = pd.DataFrame(
     heatmap_data
@@ -347,9 +345,9 @@ plt.savefig(
 plt.show()
 plt.close()
 
-# =====================================================
+
 # SALVAR CSVs
-# =====================================================
+
 
 stats_df = pd.DataFrame(results)
 
