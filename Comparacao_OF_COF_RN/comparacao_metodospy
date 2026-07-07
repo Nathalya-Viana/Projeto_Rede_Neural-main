@@ -1,0 +1,201 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold
+from sklearn.neural_network import MLPRegressor
+from sklearn.base import clone
+import os
+
+
+#PASTAS
+
+os.makedirs("Comparacao_OF_COF_RN/resultados/graficos", exist_ok=True)
+
+
+#LEITURA DOS DADOS
+
+datasets = {
+    '0.2': pd.read_csv('ResultadoporFaixaNormalizado/data_occ0_2.csv'),
+    '0.5': pd.read_csv('ResultadoporFaixaNormalizado/data_occ0_5.csv'),
+    '0.7': pd.read_csv('ResultadoporFaixaNormalizado/data_occ0_7.csv'),
+    '0.9': pd.read_csv('ResultadoporFaixaNormalizado/data_occ0_9.csv')
+}
+
+colunas = ['sample(0)', 'sample(1)', 'sample(2)', 'sample(3)', 'sample(4)', 'sample(5)', 'sample(6)']
+
+
+# ARQUITETURA DA REDE NEURAL
+
+base_model = MLPRegressor(
+    hidden_layer_sizes=(20, 10, 5),
+    activation='relu',
+    solver='adam',
+    max_iter=500,
+    random_state=42
+)
+
+
+# ALGORITMOS DOS FILTROS ÓTIMOS
+
+def optimalFilter2(train, test):
+    def of2Weights():
+        pulse = np.array([0.00002304, 0.01722640, 0.45244500, 1.0, 0.56330700, 0.14933500, 0.04235980])
+        d_pulse = np.array([0.00004019, 0.00333578, 0.03108120, 0.00000000, -0.02434490, -0.00800683, -0.00243344])
+        identidade = np.eye(7)
+        b = np.zeros((10, 10))
+        b[0:7, 0:7] = identidade
+        b[0:7, 7] = -pulse
+        b[0:7, 8] = -d_pulse
+        b[0:7, 9] = -1
+        b[7, 0:7] = pulse
+        b[8, 0:7 ] = d_pulse
+        b[9, 0:7 ] = 1
+
+        c = np.zeros((10, 1))
+        c[7] = 1
+        
+        aux = np.linalg.solve(b, c)
+        return aux[0:7].flatten()
+
+    weights = of2Weights()
+    sample4 = []
+    for i in range(len(test)):
+        auxSample = test[i] * weights
+        sample4.append(sum(auxSample))
+    return sample4
+
+def constrainedOptimalFilter(test, tol):
+    pulse = np.array([0.00002304, 0.01722640, 0.45244500, 1.0, 0.56330700, 0.14933500, 0.04235980])
+    S = np.array([
+        [pulse[3],   pulse[4],   pulse[5],   pulse[6],   0.0,       0.0,        0.0     ],
+        [pulse[2],   pulse[3],   pulse[4],   pulse[5],   pulse[6],  0.0,        0.0     ],
+        [pulse[1],   pulse[2],   pulse[3],   pulse[4],   pulse[5],  pulse[6],   0.0     ],
+        [pulse[0],   pulse[1],   pulse[2],   pulse[3],   pulse[4],  pulse[5],   pulse[6]],
+        [0.0,        pulse[0],   pulse[1],   pulse[2],   pulse[3],  pulse[4],   pulse[5]],
+        [0.0,        0.0,        pulse[0],   pulse[1],   pulse[2],  pulse[3],   pulse[4]],
+        [0.0,        0.0,        0.0,        pulse[0],   pulse[1],  pulse[2],   pulse[3]]
+    ])
+    inv_S = np.linalg.inv(S)
+    
+    sample4 = []
+    for samples in test:
+        initial_estimative = inv_S @ samples
+        cent = 3
+        active_pulses = np.zeros(7)
+        active_pulses[cent] = 1
+
+        for j in range(7):
+            if j == cent:
+                continue
+            if initial_estimative[j] > tol:
+                active_pulses[j] = 1
+
+        D_rows = []
+        count = 0
+        ind = 0
+        
+        for j in range(7):
+            if active_pulses[j] == 1:
+                if j == cent:
+                    ind = count
+                D_rows.append(S[j, :])
+                count += 1
+                
+        D = np.array(D_rows)
+        w = np.linalg.inv(D @ D.T) @ D
+        out = samples @ w.T
+        sample4.append(out[ind])
+    return sample4   
+
+
+#ARMAZENAMENTO 
+kf_interno = KFold(n_splits=10, shuffle=True, random_state=42)
+std_rn = []
+std_of2 = []
+std_cof = []
+occupancies = []
+
+bins = [0, 50, 100, 150, 200, 300, np.inf]
+labels = ['0-50', '50-100', '100-150', '150-200', '200-300', '>300']
+
+
+#LOOP OCUPAÇÃO
+
+for occ, df_occ in datasets.items():
+    print(f"Processando OCC {occ}...")
+    
+   #HOLDOUT EXTERNO (Dados Brutos) ---
+    X_bruto = df_occ[colunas].values
+    y_bruto = df_occ['AmplitudeSample(4)'].values
+    
+    # Separa 20% para o Teste Final Cego (igual para os 3 métodos)
+    X_dev_b, X_test_b, y_dev_b, y_test_b = train_test_split(
+        X_bruto, y_bruto, test_size=0.2, random_state=42
+    )
+
+    #NORMALIZAÇÃO POR FAIXA (Exclusiva para o Bloco de Desenvolvimento da MLP) ---
+    df_occ['Faixa'] = pd.cut(df_occ['AmplitudeSample(4)'], bins=bins, labels=labels)
+    picos_faixa = df_occ.groupby('Faixa', observed=True)[colunas].max().max(axis=1)
+    
+    df_norm = df_occ.copy()
+    for faixa in picos_faixa.index:
+        idx = df_norm['Faixa'] == faixa
+        df_norm.loc[idx, colunas] = df_norm.loc[idx, colunas] / picos_faixa[faixa]
+
+    X_norm = df_norm[colunas].values
+    y_norm = df_norm['AmplitudeSample(4)'].values
+
+    # Aplica exatamente o mesmo corte de Holdout nos dados normalizados da MLP
+    X_dev_rn, X_test_rn, y_dev_rn, _ = train_test_split(
+        X_norm, y_norm, test_size=0.2, random_state=42
+    )
+
+    # 10-FOLD INTERNO DA MLP
+    for train_idx, val_idx in kf_interno.split(X_dev_rn):
+        X_tr_fold, X_val_fold = X_dev_rn[train_idx], X_dev_rn[val_idx]
+        y_tr_fold, _ = y_dev_rn[train_idx], y_dev_rn[val_idx]
+        
+        # O K-Fold roda internamente 
+        model_fold = clone(base_model)
+        model_fold.fit(X_tr_fold, y_tr_fold)
+    
+    #Treinamento do modelo consolidado final da MLP 
+    mlp_final = clone(base_model)
+    mlp_final.fit(X_dev_rn, y_dev_rn)
+    
+    #AVALIAÇÃO FINAL NO HOLDOUT(20%) 
+    #Predição da MLP (Escala correta)
+    y_pred_rn = mlp_final.predict(X_test_rn)
+    
+    #Predição dos Filtros (Na escala bruta original)
+    y_pred_of2 = optimalFilter2(X_test_b, X_test_b) 
+    y_pred_cof = constrainedOptimalFilter(X_test_b, tol=5)
+
+    #Cálculo do Desvio Padrão (STD) nos resíduos brutos
+    std_rn.append(np.std(y_test_b - y_pred_rn))
+    std_of2.append(np.std(y_test_b - np.array(y_pred_of2)))
+    std_cof.append(np.std(y_test_b - np.array(y_pred_cof)))
+    
+    occupancies.append(float(occ))
+
+
+#GERAÇÃO DO GRÁFICO
+
+plt.figure(figsize=(9, 6))
+plt.plot(occupancies, std_rn, marker='o', linewidth=2.5, color='#1f77b4', label='Rede Neural (MLP)')
+plt.plot(occupancies, std_of2, marker='s', linewidth=2.5, color='#ff7f0e', label='OF2')
+plt.plot(occupancies, std_cof, marker='^', linewidth=2.5, color='#2ca02c', label='COF')
+
+plt.xlabel("Ocupação (%)", fontsize=14)
+plt.ylabel("Desvio Padrão do Erro (STD)", fontsize=14)
+plt.title("Comparativo no Conjunto de Teste Independente (Holdout + 10-Fold)", fontsize=13, fontweight='bold', pad=15)
+plt.xticks(occupancies, [f"{int(o*100)}%" for o in occupancies])
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend(fontsize=14, loc='upper left')
+
+# Salva diretamente substituindo a Figure_1.png do seu artigo
+plt.savefig("Comparacao_OF_COF_RN/resultados/graficos/Figure_1.png", dpi=300, bbox_inches="tight")
+plt.show()
+
+
