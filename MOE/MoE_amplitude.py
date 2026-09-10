@@ -27,7 +27,6 @@ os.makedirs(os.path.join(pasta_base, "resultados", "residuos"), exist_ok=True)
 # 2. ARQUITETURA MOE EM PYTORCH
 # ---------------------------------------------------------
 class Expert(nn.Module):
-    """Rede Especialista: MLP equivalente à do artigo (20, 10, 5)"""
     def __init__(self, input_dim=7):
         super(Expert, self).__init__()
         self.net = nn.Sequential(
