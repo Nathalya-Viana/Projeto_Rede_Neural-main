@@ -1,43 +1,47 @@
-import pandas as pd
+import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import KFold
+
+from sklearn.model_selection import train_test_split, KFold
 from sklearn.neural_network import MLPRegressor
 from sklearn.base import clone
-import os
 
-
-#PASTAS
-
+# 1. CRIAÇÃO DAS PASTAS
 os.makedirs("Comparacao_OF_COF_RN/resultados/graficos", exist_ok=True)
+os.makedirs("Comparacao_OF_COF_RN/resultados/stats", exist_ok=True)
 
-
-#LEITURA DOS DADOS
-
+# 2. LEITURA DOS DADOS
+# 2. LEITURA DOS DADOS (Caminhos absolutos fixados)
 datasets = {
-    '0.2': pd.read_csv('ResultadoporFaixaNormalizado/data_occ0_2.csv'),
-    '0.5': pd.read_csv('ResultadoporFaixaNormalizado/data_occ0_5.csv'),
-    '0.7': pd.read_csv('ResultadoporFaixaNormalizado/data_occ0_7.csv'),
-    '0.9': pd.read_csv('ResultadoporFaixaNormalizado/data_occ0_9.csv')
+    '0.2': pd.read_csv(
+        r'C:\Users\Nat\Desktop\Projeto_Rede_Neural\database\data_occ0_2.csv'
+    ),
+    '0.5': pd.read_csv(
+        r'C:\Users\Nat\Desktop\Projeto_Rede_Neural\database\data_occ0_5.csv'
+    ),
+    '0.7': pd.read_csv(
+        r'C:\Users\Nat\Desktop\Projeto_Rede_Neural\database\data_occ0_7.csv'
+    ),
+    '0.9': pd.read_csv(
+        r'C:\Users\Nat\Desktop\Projeto_Rede_Neural\database\data_occ0_9.csv'
+    ),
 }
 
 colunas = ['sample(0)', 'sample(1)', 'sample(2)', 'sample(3)', 'sample(4)', 'sample(5)', 'sample(6)']
 
-
-# ARQUITETURA DA REDE NEURAL
-
+# 3. ARQUITETURA DA REDE NEURAL (MLP FINAL DE 3 CAMADAS)
 base_model = MLPRegressor(
     hidden_layer_sizes=(20, 10, 5),
     activation='relu',
+    alpha=0.0001,
+    learning_rate_init=0.001,
     solver='adam',
     max_iter=500,
     random_state=42
 )
 
-
-# ALGORITMOS DOS FILTROS ÓTIMOS
-
+# 4. ALGORITMOS DOS FILTROS ÓTIMOS
 def optimalFilter2(train, test):
     def of2Weights():
         pulse = np.array([0.00002304, 0.01722640, 0.45244500, 1.0, 0.56330700, 0.14933500, 0.04235980])
@@ -108,33 +112,29 @@ def constrainedOptimalFilter(test, tol):
         sample4.append(out[ind])
     return sample4   
 
-
-#ARMAZENAMENTO 
+# 5. ESTRUTURAS DE ARMAZENAMENTO DAS MÉTRICAS
 kf_interno = KFold(n_splits=10, shuffle=True, random_state=42)
-std_rn = []
-std_of2 = []
-std_cof = []
-occupancies = []
+tabela_resultados = []
 
 bins = [0, 50, 100, 150, 200, 300, np.inf]
 labels = ['0-50', '50-100', '100-150', '150-200', '200-300', '>300']
 
+# Listas para o gráfico
+std_rn, std_of2, std_cof, occupancies = [], [], [], []
 
-#LOOP OCUPAÇÃO
-
+# 6. LOOP POR OCUPAÇÃO
 for occ, df_occ in datasets.items():
-    print(f"Processando OCC {occ}...")
+    print(f"\nProcessing OCC {occ}...")
     
-   #HOLDOUT EXTERNO (Dados Brutos) ---
+    # HOLDOUT EXTERNO (Dados Brutos para Teste)
     X_bruto = df_occ[colunas].values
     y_bruto = df_occ['AmplitudeSample(4)'].values
     
-    # Separa 20% para o Teste Final Cego (igual para os 3 métodos)
     X_dev_b, X_test_b, y_dev_b, y_test_b = train_test_split(
         X_bruto, y_bruto, test_size=0.2, random_state=42
     )
 
-    #NORMALIZAÇÃO POR FAIXA (Exclusiva para o Bloco de Desenvolvimento da MLP) ---
+    # NORMALIZAÇÃO POR FAIXA (Para desenvolvimento da MLP)
     df_occ['Faixa'] = pd.cut(df_occ['AmplitudeSample(4)'], bins=bins, labels=labels)
     picos_faixa = df_occ.groupby('Faixa', observed=True)[colunas].max().max(axis=1)
     
@@ -146,7 +146,6 @@ for occ, df_occ in datasets.items():
     X_norm = df_norm[colunas].values
     y_norm = df_norm['AmplitudeSample(4)'].values
 
-    # Aplica exatamente o mesmo corte de Holdout nos dados normalizados da MLP
     X_dev_rn, X_test_rn, y_dev_rn, _ = train_test_split(
         X_norm, y_norm, test_size=0.2, random_state=42
     )
@@ -156,32 +155,61 @@ for occ, df_occ in datasets.items():
         X_tr_fold, X_val_fold = X_dev_rn[train_idx], X_dev_rn[val_idx]
         y_tr_fold, _ = y_dev_rn[train_idx], y_dev_rn[val_idx]
         
-        # O K-Fold roda internamente 
         model_fold = clone(base_model)
         model_fold.fit(X_tr_fold, y_tr_fold)
     
-    #Treinamento do modelo consolidado final da MLP 
+    # TREINAMENTO CONSOLIDADO FINAL DA MLP
     mlp_final = clone(base_model)
     mlp_final.fit(X_dev_rn, y_dev_rn)
     
-    #AVALIAÇÃO FINAL NO HOLDOUT(20%) 
-    #Predição da MLP (Escala correta)
+    # INFERÊNCIA NO CONJUNTO DE TESTE
     y_pred_rn = mlp_final.predict(X_test_rn)
-    
-    #Predição dos Filtros (Na escala bruta original)
-    y_pred_of2 = optimalFilter2(X_test_b, X_test_b) 
-    y_pred_cof = constrainedOptimalFilter(X_test_b, tol=5)
+    y_pred_of2 = np.array(optimalFilter2(X_test_b, X_test_b))
+    y_pred_cof = np.array(constrainedOptimalFilter(X_test_b, tol=5))
 
-    #Cálculo do Desvio Padrão (STD) nos resíduos brutos
-    std_rn.append(np.std(y_test_b - y_pred_rn))
-    std_of2.append(np.std(y_test_b - np.array(y_pred_of2)))
-    std_cof.append(np.std(y_test_b - np.array(y_pred_cof)))
-    
+    # CÁLCULO DOS RESÍDUOS
+    res_rn = y_test_b - y_pred_rn
+    res_of2 = y_test_b - y_pred_of2
+    res_cof = y_test_b - y_pred_cof
+
+    # CÁLCULO DAS MÉTRICAS (MAE e STD)
+    mae_rn, std_rn_val = np.mean(np.abs(res_rn)), np.std(res_rn)
+    mae_of2, std_of2_val = np.mean(np.abs(res_of2)), np.std(res_of2)
+    mae_cof, std_cof_val = np.mean(np.abs(res_cof)), np.std(res_cof)
+
+    # ARMAZENAMENTO DOS RESULTADOS DA TABELA
+    tabela_resultados.append({
+        'Occupancy': float(occ),
+        'OF2_MAE': mae_of2,
+        'OF2_STD': std_of2_val,
+        'COF_MAE': mae_cof,
+        'COF_STD': std_cof_val,
+        'MLP_MAE': mae_rn,
+        'MLP_STD': std_rn_val
+    })
+
+    # Listas para alimentar o gráfico
+    std_rn.append(std_rn_val)
+    std_of2.append(std_of2_val)
+    std_cof.append(std_cof_val)
     occupancies.append(float(occ))
 
+    print(f"  OF2 -> MAE: {mae_of2:.2f} | STD: {std_of2_val:.2f}")
+    print(f"  COF -> MAE: {mae_cof:.2f} | STD: {std_cof_val:.2f}")
+    print(f"  MLP -> MAE: {mae_rn:.2f} | STD: {std_rn_val:.2f}")
 
-#GERAÇÃO DO GRÁFICO
+# 7. EXPORTAR TABELA CONSOLIDADA EM CSV
+df_tabela = pd.DataFrame(tabela_resultados)
+df_tabela.to_csv("Comparacao_OF_COF_RN/resultados/stats/tabela_comparativa_metodos.csv", index=False)
 
+print("\n" + "="*60)
+print("TABELA COMPARATIVA CONSOLIDADA (CONJUNTO DE TESTE)")
+print("="*60)
+print(df_tabela.to_string(index=False))
+print("="*60)
+print("Tabela salva em: 'Comparacao_OF_COF_RN/resultados/stats/tabela_comparativa_metodos.csv'")
+
+# 8. GERAÇÃO DO GRÁFICO
 plt.figure(figsize=(9, 6))
 plt.plot(occupancies, std_rn, marker='o', linewidth=2.5, color='#1f77b4', label='Rede Neural (MLP)')
 plt.plot(occupancies, std_of2, marker='s', linewidth=2.5, color='#ff7f0e', label='OF2')
@@ -194,8 +222,5 @@ plt.xticks(occupancies, [f"{int(o*100)}%" for o in occupancies])
 plt.grid(True, linestyle='--', alpha=0.6)
 plt.legend(fontsize=14, loc='upper left')
 
-# Salva diretamente substituindo a Figure_1.png do seu artigo
 plt.savefig("Comparacao_OF_COF_RN/resultados/graficos/Figure_1.png", dpi=300, bbox_inches="tight")
 plt.show()
-
-
